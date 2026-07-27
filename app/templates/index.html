@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vet Margin Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --good: #059669;
+      --warn: #d97706;
+      --border: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Segoe UI, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1, h2 { margin: 0 0 12px; }
+    .subtle { color: var(--muted); }
+    .grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      margin: 20px 0;
+    }
+    .summary-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    @media (max-width: 900px) {
+      .summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    .metric-label { color: var(--muted); font-size: 14px; }
+    .metric-value { font-size: 28px; font-weight: 700; margin-top: 8px; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 20px;
+    }
+    label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+    input[type="date"] {
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    button, .button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 14px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 14px;
+    }
+    button.secondary, .button.secondary {
+      background: white;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .status-ok { color: var(--good); }
+    .status-error { color: #dc2626; }
+    .banner {
+      padding: 12px 14px;
+      border-radius: 10px;
+      margin-bottom: 16px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+    }
+    .banner.warn {
+      background: #fffbeb;
+      border-color: #fcd34d;
+    }
+    .banner.good {
+      background: #ecfdf5;
+      border-color: #6ee7b7;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Vet Margin Dashboard</h1>
+    <p class="subtle">Shepherd revenue &amp; COGS combined with QuickBooks overhead for your mobile clinic. QBO mode: <strong>{{ qbo_environment }}</strong>.</p>
+
+    {% if summary.using_shepherd_report %}
+    <div class="banner good">
+      <strong>Revenue and COGS match Shepherd's Revenue &amp; Cost report.</strong>
+      Totals are pulled from the <code>revenue-and-cost-overview-report</code> API for this period.
+    </div>
+    {% elif summary.revenue > 0 and summary.cogs_is_partial %}
+    <div class="banner warn">
+      <strong>COGS is a best-effort estimate from Shepherd inventory data.</strong>
+      It may be lower than Shepherd's Revenue &amp; Cost report because lab and service product
+      costs are not fully exposed via the OpenAPI. Totals will auto-update if Shepherd enables
+      the <code>revenue-and-cost-overview-report</code> API endpoint.
+    </div>
+    {% endif %}
+
+    {% if summary.revenue == 0 and summary.overhead == 0 %}
+    <div class="banner">
+      <strong>Dashboard is empty until you sync data.</strong>
+      <ol style="margin: 8px 0 0; padding-left: 20px;">
+        <li>Set the date range to a period where you have invoices in Shepherd.</li>
+        <li>Click <strong>Sync All</strong> (or Sync Shepherd + Sync QuickBooks).</li>
+        <li>Check <strong>Recent Sync Activity</strong> at the bottom if anything fails.</li>
+      </ol>
+    </div>
+    {% endif %}
+
+    {% if not qbo_connected and qbo_configured %}
+    <div class="banner">
+      <strong>QuickBooks (Development / sandbox):</strong>
+      If connect fails with "no sandbox companies found", create one at
+      <a href="https://developer.intuit.com" target="_blank">developer.intuit.com</a>
+      → Sandbox → Add sandbox company. For your real company data, use Production keys and set
+      <code>QBO_ENVIRONMENT=production</code> in <code>.env</code>.
+    </div>
+    {% endif %}
+
+    {% if not shepherd_configured or not qbo_configured %}
+    <div class="banner">
+      {% if not shepherd_configured %}<div>Shepherd credentials missing — copy <code>.env.example</code> to <code>.env</code> and fill in your keys.</div>{% endif %}
+      {% if not qbo_configured %}<div>QuickBooks app credentials missing — add your Intuit Developer Client ID and Secret to <code>.env</code>.</div>{% endif %}
+    </div>
+    {% endif %}
+
+    <form class="toolbar" method="get">
+      <label>Start<input type="date" name="start" value="{{ start_date }}"></label>
+      <label>End<input type="date" name="end" value="{{ end_date }}"></label>
+      <button type="submit">Update period</button>
+      <a class="button secondary" href="/export/summary.csv?start={{ start_date }}&amp;end={{ end_date }}">Export CSV</a>
+      {% if qbo_configured and not qbo_connected %}
+      <a class="button" href="/qbo/connect">Connect QuickBooks</a>
+      {% endif %}
+    </form>
+
+    <div class="grid summary-grid">
+      <div class="card">
+        <div class="metric-label">Total Revenue</div>
+        <div class="metric-value">{{ summary.revenue|currency }}</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">COGS</div>
+        <div class="metric-value">{{ summary.cogs|currency }}</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Overhead</div>
+        <div class="metric-value">{{ summary.overhead|currency }}</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Net Margin</div>
+        <div class="metric-value">{{ summary.net_margin|currency }}</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 16px;">
+      <h2>Client Margins</h2>
+      <p class="subtle">Monthly service review by client for {{ start_date }} through {{ end_date }}. Overhead allocated by each client's share of revenue.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Client</th>
+            <th>Revenue</th>
+            <th>COGS</th>
+            <th>Gross Margin</th>
+            <th>Allocated Overhead</th>
+            <th>Net Margin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for client in summary.clients %}
+          <tr>
+            <td>{{ client.client_name }}</td>
+            <td>{{ client.revenue|currency }}</td>
+            <td>{{ client.cogs|currency }}</td>
+            <td>{{ client.gross_margin|currency }} ({{ "%.1f"|format(client.gross_margin_pct) }}%)</td>
+            <td>{{ client.allocated_overhead|currency }}</td>
+            <td>{{ client.net_margin|currency }} ({{ "%.1f"|format(client.net_margin_pct) }}%)</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6">No client data for this period. Run <strong>Sync Shepherd</strong> to refresh client names.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="toolbar">
+      <button type="button" onclick="runSync('/sync/all')">Sync All</button>
+      <button type="button" class="secondary" onclick="runSync('/sync/shepherd')">Sync Shepherd</button>
+      <button type="button" class="secondary" onclick="runSync('/sync/qbo')">Sync QuickBooks</button>
+      <span id="sync-status" class="subtle"></span>
+    </div>
+
+    <div class="card" style="margin-bottom: 16px;">
+      <h2>Category Margins</h2>
+      <p class="subtle">Overhead allocated proportionally by each category's share of revenue.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Revenue</th>
+            <th>COGS</th>
+            <th>Gross Margin</th>
+            <th>Allocated Overhead</th>
+            <th>Net Margin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for category in summary.categories %}
+          <tr>
+            <td>{{ category.category }}</td>
+            <td>{{ category.revenue|currency }}</td>
+            <td>{{ category.cogs|currency }}</td>
+            <td>{{ category.gross_margin|currency }} ({{ "%.1f"|format(category.gross_margin_pct) }}%)</td>
+            <td>{{ category.allocated_overhead|currency }}</td>
+            <td>{{ category.net_margin|currency }} ({{ "%.1f"|format(category.net_margin_pct) }}%)</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6">No Shepherd data synced for this period yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-bottom: 16px;">
+      <h2>QuickBooks Overhead Accounts</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th>Group</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for account in summary.overhead_accounts %}
+          <tr>
+            <td>{{ account.account_name }}</td>
+            <td>{{ account.account_group }}</td>
+            <td>{{ account.amount|currency }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3">No QuickBooks overhead synced for this period yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Recent Sync Activity</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Status</th>
+            <th>Message</th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sync in recent_syncs %}
+          <tr>
+            <td>{{ sync.source }}</td>
+            <td class="{{ 'status-ok' if sync.status == 'success' else 'status-error' }}">{{ sync.status }}</td>
+            <td>{{ sync.message }}</td>
+            <td>{{ sync.created_at }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4">No syncs yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function runSync(path) {
+      const params = new URLSearchParams(window.location.search);
+      const start = params.get('start') || '{{ start_date }}';
+      const end = params.get('end') || '{{ end_date }}';
+      const status = document.getElementById('sync-status');
+      status.textContent = 'Syncing...';
+      try {
+        const response = await fetch(`${path}?start=${start}&end=${end}`, { method: 'POST' });
+        const data = await response.json();
+        status.textContent = data.message;
+        if (data.status === 'success') {
+          window.location.reload();
+        }
+      } catch (error) {
+        status.textContent = 'Sync failed.';
+      }
+    }
+  </script>
+</body>
+</html>
