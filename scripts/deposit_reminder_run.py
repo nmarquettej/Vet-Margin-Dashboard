@@ -26,9 +26,20 @@ CLIENT_SUBJECT = "[WWMVC] Appointment Reminder & Account Balance Notice"
 GMAIL_VERSION = "20260721_00"
 PORTAL_URL = "https://petportal.vet/whisker-waggin-wnc/payment/0"
 
-# Previously LIVE-sent unpaid tracking (from automation memory as of 2026-08-13).
+# Previously LIVE-sent unpaid tracking (from automation memory as of 2026-08-14).
 # Format used for paid-since compare. Update after each live run via memory.
-PRIOR_TRACKED_UNPAID: list[dict[str, Any]] = []
+PRIOR_TRACKED_UNPAID: list[dict[str, Any]] = [
+    {
+        "client": "Ashleigh Modlin",
+        "client_id": "4a689e67-176c-4e5f-a294-b4a300e3fc33",
+        "appointment_id": "8174970a-2a7b-4525-837d-b4a200e5ceb6",
+        "appointment": "Mon 8/17 3:30pm",
+        "milestone": "1-week",
+        "outstanding_fmt": "$225.00",
+        "invoice_id": "fdf39789-de86-49e4-8dbf-b4a300e58116",
+        "invoice": "#285",
+    },
+]
 # Historical LIVE-sent milestones (appointment_id|milestone) — do not re-send.
 SENT_MILESTONES: set[str] = {
     "1555f827-2570-419e-a21d-b48e01519e2f|1-week",
@@ -39,13 +50,8 @@ SENT_MILESTONES: set[str] = {
     "2792a999-5908-4220-bce8-b48301070f12|1-week",
     "9377b397-34cd-4739-af0b-b495017a430e|1-week",
     "9377b397-34cd-4739-af0b-b495017a430e|48-hour",
+    "8174970a-2a7b-4525-837d-b4a200e5ceb6|1-week",
 }
-
-# Prior reported clients who were unpaid when last emailed (for paid-since),
-# including those already cleared in last report for reference. Currently none unpaid.
-PRIOR_REPORTED: list[dict[str, Any]] = [
-    # Katie Fiore cleared on 2026-08-13 — already reported paid; do not re-list.
-]
 
 
 def env(name: str) -> str:
