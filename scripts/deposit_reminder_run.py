@@ -58,18 +58,8 @@ DEFAULT_SENT_MILESTONES: set[tuple[str, str]] = {
 }
 
 # Prior unpaid tracked clients for paid-since compare (from last successful report).
-DEFAULT_PRIOR_UNPAID: list[dict[str, Any]] = [
-    {
-        "client_name": "Ashleigh Modlin",
-        "client_id": "4a689e67-176c-4e5f-a294-b4a300e3fc33",
-        "appointment_id": "8174970a-2a7b-4525-837d-b4a200e5ceb6",
-        "milestone": "1-week",
-        "invoice_id": "fdf39789-de86-49e4-8dbf-b4a300e58116",
-        "invoice_number": "285",
-        "outstanding": 225.0,
-        "appointment_display": "Mon 8/17 3:30pm",
-    }
-]
+# Updated 2026-08-17: Ashleigh Modlin cleared (paid to credit $255). None currently tracked.
+DEFAULT_PRIOR_UNPAID: list[dict[str, Any]] = []
 
 
 def shepherd_headers() -> dict[str, str]:
