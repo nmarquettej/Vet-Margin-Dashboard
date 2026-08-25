@@ -527,6 +527,33 @@ def qualify(now: datetime) -> dict[str, Any]:
             }
         )
 
+    # One email per deposit invoice (same client + same open deposit across
+    # multiple same-day appointment slots must not get duplicate reminders).
+    # Prefer earliest appointment; mark later slots as exclusions.
+    qualified.sort(key=lambda r: r["start"])
+    seen_invoices: dict[str, dict] = {}
+    deduped: list[dict] = []
+    for row in qualified:
+        inv_key = row.get("invoice_id") or f"{row.get('client_id')}:{row.get('invoice_number')}"
+        if inv_key in seen_invoices:
+            primary = seen_invoices[inv_key]
+            primary.setdefault("sibling_appointment_ids", []).append(row["appointment_id"])
+            exclusions.append(
+                {
+                    **{k: row[k] for k in (
+                        "appointment_id", "client_id", "client", "email",
+                        "appointment", "start", "status", "milestone",
+                    )},
+                    "reason": f"duplicate deposit invoice #{row.get('invoice_number')} (already queued for earlier appointment)",
+                    "invoice": row.get("invoice_label"),
+                }
+            )
+            continue
+        row = {**row, "sibling_appointment_ids": []}
+        seen_invoices[inv_key] = row
+        deduped.append(row)
+    qualified = deduped
+
     # Paid since last report
     paid_since = []
     for prior in PRIOR_UNPAID:
@@ -721,6 +748,7 @@ def main() -> int:
                     "message_id": mid,
                     "outstanding_raw": qrow["outstanding"],
                     "invoice_number": qrow["invoice_number"],
+                    "sibling_appointment_ids": qrow.get("sibling_appointment_ids") or [],
                 }
             )
         except Exception as e:
@@ -797,6 +825,17 @@ def main() -> int:
         by_id[str(u["appointment_id"])] = u
     result["tracked_unpaid"] = list(by_id.values())
 
+    # appointment_id -> milestones to record as sent (includes sibling slots sharing deposit)
+    milestones_to_mark: dict[str, list[str]] = {}
+    for s in sent_rows:
+        ms = s["milestone"]
+        ids = [s["appointment_id"]] + list(s.get("sibling_appointment_ids") or [])
+        for aid in ids:
+            milestones_to_mark.setdefault(str(aid), [])
+            if ms not in milestones_to_mark[str(aid)]:
+                milestones_to_mark[str(aid)].append(ms)
+    result["milestones_to_mark"] = milestones_to_mark
+
     with open(args.out, "w") as f:
         json.dump(result, f, indent=2, default=str)
 
@@ -809,6 +848,7 @@ def main() -> int:
         "staff_report": result.get("staff_report"),
         "exclusions": result.get("exclusions"),
         "tracked_unpaid": result.get("tracked_unpaid"),
+        "milestones_to_mark": milestones_to_mark,
         "send_errors": send_errors,
         "signature_chars": result.get("signature_chars"),
     }
