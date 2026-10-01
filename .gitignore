@@ -13,3 +13,4 @@ build/
 *.egg-info/
 .DS_Store
 Thumbs.db
+scripts/.nonprofit_ar_draft_tracking.json
