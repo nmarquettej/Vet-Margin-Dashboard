@@ -97,6 +97,7 @@ async def qbo_connect(
     request: Request,
     db: Session = Depends(get_db),
     fresh: int = Query(default=1),
+    logout: int = Query(default=0),
 ):
     if not settings.qbo_configured:
         return RedirectResponse("/", status_code=303)
@@ -106,9 +107,9 @@ async def qbo_connect(
     state = f"vet-margin-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
     authorize_url = get_authorization_url(state=state, force_login=True)
 
-    if fresh:
-        # Bounce through Intuit logout first so an existing Intuit cookie
-        # cannot silently re-select the sandbox company.
+    # Optional Intuit logout hop. Default OFF because Intuit often ignores
+    # redirect_uri and drops the user on their account home (breaking OAuth).
+    if logout:
         host = str(request.base_url).rstrip("/")
         return_to = f"{host}/qbo/authorize?state={quote(state)}"
         return RedirectResponse(intuit_logout_url(return_to), status_code=303)

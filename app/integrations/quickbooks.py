@@ -39,14 +39,18 @@ def get_authorization_url(state: str = "vet-margin-dashboard", *, force_login: b
     auth_client = get_auth_client()
     url = auth_client.get_authorization_url([Scopes.ACCOUNTING], state_token=state)
     if force_login:
-        # prompt=login avoids silently reusing an existing Intuit browser session/company.
+        # prompt=login asks for a fresh sign-in; prompt=consent re-shows authorize/company pick.
         separator = "&" if "?" in url else "?"
-        url = f"{url}{separator}prompt=login"
+        url = f"{url}{separator}prompt=login%20consent"
     return url
 
 
 def intuit_logout_url(return_to: str) -> str:
-    """Send the browser through Intuit logout, then back to our connect flow."""
+    """Send the browser through Intuit logout, then back to our connect flow.
+
+    Note: Intuit often ignores redirect_uri here and dumps users on their account
+    home, so the default connect path should skip this hop.
+    """
     return (
         "https://accounts.intuit.com/index.html?"
         + urlencode({"off": "true", "redirect_uri": return_to})
