@@ -167,10 +167,11 @@
     {% if not qbo_connected and qbo_configured %}
     <div class="banner">
       <strong>QuickBooks not connected.</strong>
-      For live Whisker Waggin’ overhead, use Production Intuit keys with
-      <code>QBO_ENVIRONMENT=production</code>, then
-      <a href="/qbo/connect">Connect QuickBooks</a>.
-      Sandbox is only for Intuit sample companies.
+      Use an <strong>incognito/private</strong> window, then
+      <a href="/qbo/reset"><strong>Reset &amp; Connect QuickBooks (fresh login)</strong></a>.
+      That signs you out of Intuit first so it cannot reuse a sandbox company.
+      For live overhead you need Production Intuit keys +
+      <code>QBO_ENVIRONMENT=production</code>.
     </div>
     {% endif %}
 
@@ -187,9 +188,10 @@
       <button type="submit">Update period</button>
       <a class="button secondary" href="/export/summary.csv?start={{ start_date }}&amp;end={{ end_date }}">Export CSV</a>
       {% if qbo_configured and not qbo_connected %}
-      <a class="button" href="/qbo/connect">Connect QuickBooks</a>
+      <a class="button" href="/qbo/reset">Reset &amp; Connect QuickBooks</a>
       {% elif qbo_connected %}
       <a class="button secondary" href="/qbo/disconnect">Disconnect QuickBooks</a>
+      <a class="button" href="/qbo/reset">Reset &amp; Reconnect (fresh login)</a>
       {% endif %}
     </form>
 

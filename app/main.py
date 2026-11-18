@@ -10,13 +10,17 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from urllib.parse import quote
+
 from app.config import settings
 from app.db.models import InvoiceLine, QboToken, SyncRun, get_db
+
 from app.integrations.quickbooks import (
     disconnect_qbo,
     exchange_code_for_tokens,
     fetch_company_name,
     get_authorization_url,
+    intuit_logout_url,
 )
 from app.services.margins import build_practice_summary
 from app.services.sync import sync_all, sync_qbo, sync_shepherd
@@ -89,10 +93,38 @@ async def dashboard(
 
 
 @router.get("/qbo/connect")
-async def qbo_connect():
+async def qbo_connect(
+    request: Request,
+    db: Session = Depends(get_db),
+    fresh: int = Query(default=1),
+):
     if not settings.qbo_configured:
         return RedirectResponse("/", status_code=303)
-    return RedirectResponse(get_authorization_url())
+
+    # Always clear any prior connection before starting OAuth.
+    disconnect_qbo(db)
+    state = f"vet-margin-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    authorize_url = get_authorization_url(state=state, force_login=True)
+
+    if fresh:
+        # Bounce through Intuit logout first so an existing Intuit cookie
+        # cannot silently re-select the sandbox company.
+        host = str(request.base_url).rstrip("/")
+        return_to = f"{host}/qbo/authorize?state={quote(state)}"
+        return RedirectResponse(intuit_logout_url(return_to), status_code=303)
+
+    return RedirectResponse(authorize_url, status_code=303)
+
+
+@router.get("/qbo/authorize")
+async def qbo_authorize(state: str = Query(default="vet-margin-dashboard")):
+    """Second hop after Intuit logout — start OAuth with a fresh login prompt."""
+    if not settings.qbo_configured:
+        return RedirectResponse("/", status_code=303)
+    return RedirectResponse(
+        get_authorization_url(state=state, force_login=True),
+        status_code=303,
+    )
 
 
 @router.get("/qbo/disconnect")
@@ -101,12 +133,21 @@ async def qbo_disconnect(db: Session = Depends(get_db)):
     return RedirectResponse("/?qbo=disconnected", status_code=303)
 
 
+@router.get("/qbo/reset")
+async def qbo_reset(db: Session = Depends(get_db)):
+    """Hard reset connection state, then send the user to a fresh Intuit login."""
+    disconnect_qbo(db)
+    return RedirectResponse("/qbo/connect?fresh=1", status_code=303)
+
+
 @router.get("/qbo/callback")
 async def qbo_callback(
     code: str = Query(...),
     realmId: str = Query(...),
     db: Session = Depends(get_db),
 ):
+    # Ensure only the newly authorized company remains.
+    disconnect_qbo(db)
     exchange_code_for_tokens(code, realmId, db)
     return RedirectResponse("/?qbo=connected", status_code=303)
 

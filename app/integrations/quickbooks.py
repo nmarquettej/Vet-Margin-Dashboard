@@ -34,9 +34,23 @@ def get_auth_client() -> AuthClient:
     )
 
 
-def get_authorization_url(state: str = "vet-margin-dashboard") -> str:
+def get_authorization_url(state: str = "vet-margin-dashboard", *, force_login: bool = True) -> str:
+    """Build Intuit OAuth URL. force_login asks Intuit for a fresh sign-in/company picker."""
     auth_client = get_auth_client()
-    return auth_client.get_authorization_url([Scopes.ACCOUNTING], state_token=state)
+    url = auth_client.get_authorization_url([Scopes.ACCOUNTING], state_token=state)
+    if force_login:
+        # prompt=login avoids silently reusing an existing Intuit browser session/company.
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}prompt=login"
+    return url
+
+
+def intuit_logout_url(return_to: str) -> str:
+    """Send the browser through Intuit logout, then back to our connect flow."""
+    return (
+        "https://accounts.intuit.com/index.html?"
+        + urlencode({"off": "true", "redirect_uri": return_to})
+    )
 
 
 def exchange_code_for_tokens(code: str, realm_id: str, db: Session) -> QboToken:
