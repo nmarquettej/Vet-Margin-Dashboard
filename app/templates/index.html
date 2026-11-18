@@ -164,14 +164,30 @@
     </div>
     {% endif %}
 
+    {% if qbo_status == 'error' and qbo_error_detail %}
+    <div class="banner warn">
+      <strong>QuickBooks connect failed.</strong> {{ qbo_error_detail }}
+    </div>
+    {% endif %}
+
     {% if not qbo_connected and qbo_configured %}
     <div class="banner">
       <strong>QuickBooks not connected.</strong>
-      Use an <strong>incognito/private</strong> window, then
-      <a href="/qbo/reset"><strong>Reset &amp; Connect QuickBooks (fresh login)</strong></a>.
-      That starts Intuit OAuth with a login/consent prompt so you can pick the live company.
-      For live overhead you need Production Intuit keys +
-      <code>QBO_ENVIRONMENT=production</code>.
+      Production OAuth uses a <strong>permanent</strong> GitHub Pages catcher
+      (no more changing tunnel URLs in Intuit).
+      <ol style="margin:0.6rem 0 0.4rem 1.1rem; padding:0;">
+        <li>Register this exact Production redirect URI in Intuit:<br>
+          <code>{{ qbo_redirect_uri }}</code></li>
+        <li>Open <a href="/qbo/reset"><strong>Reset &amp; Connect QuickBooks</strong></a> and pick the live company.</li>
+        <li>If the catcher page does not bounce back here, copy its callback URL and paste it below.</li>
+      </ol>
+      <form method="post" action="/qbo/finish" style="margin-top:0.75rem; display:grid; gap:0.4rem;">
+        <label for="callback_url" style="font-weight:600;">Finish QuickBooks connection</label>
+        <input id="callback_url" name="callback_url" type="url" required
+               placeholder="Paste the catcher URL that includes code= and realmId="
+               style="width:100%; padding:0.55rem 0.65rem;">
+        <button type="submit">Complete connection</button>
+      </form>
     </div>
     {% endif %}
 

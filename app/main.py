@@ -4,13 +4,13 @@ import csv
 import io
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from app.dates import default_period, parse_end_date, parse_start_date
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlparse
 
 from app.config import settings
 from app.db.models import InvoiceLine, QboToken, SyncRun, get_db
@@ -73,6 +73,8 @@ async def dashboard(
             qbo_company_name = ""
     recent_syncs = db.query(SyncRun).order_by(SyncRun.created_at.desc()).limit(8).all()
     qbo_is_sandbox = settings.qbo_environment != "production"
+    qbo_status = request.query_params.get("qbo", "")
+    qbo_error_detail = request.query_params.get("detail", "")
 
     return templates.TemplateResponse(
         request,
@@ -87,6 +89,9 @@ async def dashboard(
             "qbo_environment": settings.qbo_environment,
             "qbo_is_sandbox": qbo_is_sandbox,
             "qbo_company_name": qbo_company_name,
+            "qbo_redirect_uri": settings.qbo_redirect_uri,
+            "qbo_status": qbo_status,
+            "qbo_error_detail": qbo_error_detail,
             "recent_syncs": recent_syncs,
         },
     )
@@ -141,6 +146,23 @@ async def qbo_reset(db: Session = Depends(get_db)):
     return RedirectResponse("/qbo/connect?fresh=1", status_code=303)
 
 
+def _extract_oauth_callback(raw: str) -> tuple[str, str]:
+    """Parse code + realmId from a pasted Intuit/GitHub Pages callback URL."""
+    text = (raw or "").strip()
+    if not text:
+        raise ValueError("Paste the full callback URL from the OAuth catcher page.")
+    parsed = urlparse(text)
+    query = parse_qs(parsed.query)
+    if not query and "code=" in text:
+        # Allow pasting a raw query string.
+        query = parse_qs(text.lstrip("?"))
+    code = (query.get("code") or [""])[0].strip()
+    realm_id = (query.get("realmId") or query.get("realm_id") or [""])[0].strip()
+    if not code or not realm_id:
+        raise ValueError("Callback URL must include code and realmId query parameters.")
+    return code, realm_id
+
+
 @router.get("/qbo/callback")
 async def qbo_callback(
     code: str = Query(...),
@@ -150,6 +172,27 @@ async def qbo_callback(
     # Ensure only the newly authorized company remains.
     disconnect_qbo(db)
     exchange_code_for_tokens(code, realmId, db)
+    return RedirectResponse("/?qbo=connected", status_code=303)
+
+
+@router.post("/qbo/finish")
+async def qbo_finish(
+    db: Session = Depends(get_db),
+    callback_url: str = Form(...),
+):
+    """Finish OAuth when Intuit redirected to the permanent GitHub Pages catcher."""
+    try:
+        code, realm_id = _extract_oauth_callback(callback_url)
+    except ValueError as exc:
+        return RedirectResponse(f"/?qbo=error&detail={quote(str(exc))}", status_code=303)
+    disconnect_qbo(db)
+    try:
+        exchange_code_for_tokens(code, realm_id, db)
+    except Exception as exc:
+        return RedirectResponse(
+            f"/?qbo=error&detail={quote(f'Token exchange failed: {exc}')}",
+            status_code=303,
+        )
     return RedirectResponse("/?qbo=connected", status_code=303)
 
 
