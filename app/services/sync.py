@@ -139,7 +139,26 @@ async def sync_qbo(db: Session, start_date: datetime, end_date: datetime) -> Syn
         )
     except Exception as exc:
         run.status = "error"
-        run.message = str(exc)
+        message = str(exc)
+        lowered = message.lower()
+        if "403" in message or "forbidden" in lowered:
+            if settings.qbo_environment == "production":
+                message = (
+                    "QuickBooks returned 403 Forbidden from the PRODUCTION API. "
+                    "The connected company/token is likely a sandbox company "
+                    f"(realm {token.realm_id}). Fix: Disconnect QuickBooks, set "
+                    "QBO_ENVIRONMENT=sandbox to use sample data, or use Production "
+                    "Intuit app keys and reconnect your live Whisker Waggin’ company. "
+                    f"Original error: {exc}"
+                )
+            else:
+                message = (
+                    "QuickBooks returned 403 Forbidden from the sandbox API. "
+                    "Disconnect and reconnect QuickBooks, and confirm the Intuit app "
+                    "keys match QBO_ENVIRONMENT=sandbox. "
+                    f"Original error: {exc}"
+                )
+        run.message = message
 
     db.commit()
     db.refresh(run)

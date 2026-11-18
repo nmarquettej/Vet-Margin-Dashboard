@@ -252,6 +252,15 @@ async def fetch_profit_and_loss(
                 "Accept": "application/json",
             },
         )
+        if response.status_code == 403:
+            env = settings.qbo_environment
+            raise httpx.HTTPStatusError(
+                f"403 Forbidden calling {settings.qbo_api_base} for realm {token.realm_id}. "
+                f"QBO_ENVIRONMENT={env}. A sandbox company token cannot call the production "
+                "API (and vice versa). Disconnect QuickBooks and reconnect with matching keys/env.",
+                request=response.request,
+                response=response,
+            )
         response.raise_for_status()
         report = response.json()
 
