@@ -5,7 +5,13 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.db.models import InvoiceLine, QboToken, SyncRun
-from app.integrations.quickbooks import fetch_profit_and_loss, store_qbo_expenses
+from app.config import settings
+from app.dates import parse_end_date, parse_start_date
+from app.integrations.quickbooks import (
+    fetch_company_name,
+    fetch_profit_and_loss,
+    store_qbo_expenses,
+)
 from app.integrations.shepherd import ShepherdClient, extract_invoice_lines
 from app.integrations.shepherd_report import parse_report_api_payload
 from app.services.shepherd_report_store import store_shepherd_report
@@ -111,11 +117,26 @@ async def sync_qbo(db: Session, start_date: datetime, end_date: datetime) -> Syn
         return run
 
     try:
-        expenses = await fetch_profit_and_loss(token, db, start_date, end_date)
-        count = store_qbo_expenses(db, expenses, start_date, end_date)
+        # Always persist with normalized period bounds so dashboard lookups match.
+        period_start = parse_start_date(start_date)
+        period_end = parse_end_date(end_date)
+        company_name = await fetch_company_name(token, db)
+        expenses = await fetch_profit_and_loss(token, db, period_start, period_end)
+        count = store_qbo_expenses(db, expenses, period_start, period_end)
         total_overhead = sum(expense["amount"] for expense in expenses)
+        company_note = f" ({company_name})" if company_name else ""
+        env_note = ""
+        if settings.qbo_environment != "production":
+            env_note = (
+                f" WARNING: QBO_ENVIRONMENT={settings.qbo_environment} — "
+                "this is not production company data."
+            )
         run.status = "success"
-        run.message = f"Synced {count} overhead accounts totaling ${total_overhead:,.2f} from QuickBooks P&L"
+        run.message = (
+            f"Synced {count} overhead accounts totaling ${total_overhead:,.2f} "
+            f"from QuickBooks P&L{company_note} "
+            f"for {period_start.date()} to {period_end.date()}.{env_note}"
+        )
     except Exception as exc:
         run.status = "error"
         run.message = str(exc)

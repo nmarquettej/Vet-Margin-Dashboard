@@ -115,7 +115,21 @@
 <body>
   <div class="container">
     <h1>Vet Margin Dashboard</h1>
-    <p class="subtle">Shepherd revenue &amp; COGS combined with QuickBooks overhead for your mobile clinic. QBO mode: <strong>{{ qbo_environment }}</strong>.</p>
+    <p class="subtle">
+      Shepherd revenue &amp; COGS combined with QuickBooks overhead for your mobile clinic.
+      QBO mode: <strong>{{ qbo_environment }}</strong>
+      {% if qbo_company_name %}· connected company: <strong>{{ qbo_company_name }}</strong>{% endif %}.
+    </p>
+
+    {% if qbo_connected and qbo_is_sandbox %}
+    <div class="banner warn">
+      <strong>QuickBooks is connected to SANDBOX sample data — overhead will look drastically wrong.</strong>
+      Accounts like landscaping/sample companies are not Whisker Waggin’.
+      Set <code>QBO_ENVIRONMENT=production</code>, use Production Intuit app keys,
+      then <a href="/qbo/disconnect">disconnect</a> and
+      <a href="/qbo/connect">reconnect QuickBooks</a> to your real company.
+    </div>
+    {% endif %}
 
     {% if summary.using_shepherd_report %}
     <div class="banner good">
@@ -142,13 +156,21 @@
     </div>
     {% endif %}
 
+    {% if qbo_connected and summary.revenue > 0 and summary.overhead == 0 %}
+    <div class="banner warn">
+      <strong>No QuickBooks overhead for {{ start_date }} → {{ end_date }}.</strong>
+      Overhead is stored per exact date range (a YTD sync will not fill a month view).
+      Click <strong>Sync QuickBooks</strong> for this period.
+    </div>
+    {% endif %}
+
     {% if not qbo_connected and qbo_configured %}
     <div class="banner">
-      <strong>QuickBooks (Development / sandbox):</strong>
-      If connect fails with "no sandbox companies found", create one at
-      <a href="https://developer.intuit.com" target="_blank">developer.intuit.com</a>
-      → Sandbox → Add sandbox company. For your real company data, use Production keys and set
-      <code>QBO_ENVIRONMENT=production</code> in <code>.env</code>.
+      <strong>QuickBooks not connected.</strong>
+      For live Whisker Waggin’ overhead, use Production Intuit keys with
+      <code>QBO_ENVIRONMENT=production</code>, then
+      <a href="/qbo/connect">Connect QuickBooks</a>.
+      Sandbox is only for Intuit sample companies.
     </div>
     {% endif %}
 
@@ -166,6 +188,8 @@
       <a class="button secondary" href="/export/summary.csv?start={{ start_date }}&amp;end={{ end_date }}">Export CSV</a>
       {% if qbo_configured and not qbo_connected %}
       <a class="button" href="/qbo/connect">Connect QuickBooks</a>
+      {% elif qbo_connected %}
+      <a class="button secondary" href="/qbo/disconnect">Disconnect QuickBooks</a>
       {% endif %}
     </form>
 

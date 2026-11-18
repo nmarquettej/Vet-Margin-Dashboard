@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import InvoiceLine, QboToken, SyncRun, get_db
-from app.integrations.quickbooks import exchange_code_for_tokens, get_authorization_url
+from app.integrations.quickbooks import (
+    disconnect_qbo,
+    exchange_code_for_tokens,
+    fetch_company_name,
+    get_authorization_url,
+)
 from app.services.margins import build_practice_summary
 from app.services.sync import sync_all, sync_qbo, sync_shepherd
 
@@ -54,8 +59,16 @@ async def dashboard(
     end_date = parse_end_date(end) if end else default_end
 
     summary = build_practice_summary(db, start_date, end_date)
-    qbo_connected = db.query(QboToken).count() > 0
+    qbo_token = db.query(QboToken).order_by(QboToken.updated_at.desc()).first()
+    qbo_connected = qbo_token is not None
+    qbo_company_name = ""
+    if qbo_token is not None:
+        try:
+            qbo_company_name = await fetch_company_name(qbo_token, db)
+        except Exception:
+            qbo_company_name = ""
     recent_syncs = db.query(SyncRun).order_by(SyncRun.created_at.desc()).limit(8).all()
+    qbo_is_sandbox = settings.qbo_environment != "production"
 
     return templates.TemplateResponse(
         request,
@@ -68,6 +81,8 @@ async def dashboard(
             "qbo_configured": settings.qbo_configured,
             "qbo_connected": qbo_connected,
             "qbo_environment": settings.qbo_environment,
+            "qbo_is_sandbox": qbo_is_sandbox,
+            "qbo_company_name": qbo_company_name,
             "recent_syncs": recent_syncs,
         },
     )
@@ -78,6 +93,12 @@ async def qbo_connect():
     if not settings.qbo_configured:
         return RedirectResponse("/", status_code=303)
     return RedirectResponse(get_authorization_url())
+
+
+@router.get("/qbo/disconnect")
+async def qbo_disconnect(db: Session = Depends(get_db)):
+    disconnect_qbo(db)
+    return RedirectResponse("/?qbo=disconnected", status_code=303)
 
 
 @router.get("/qbo/callback")
