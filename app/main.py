@@ -4,15 +4,24 @@ import csv
 import io
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from app.dates import default_period, parse_end_date, parse_start_date
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from urllib.parse import parse_qs, quote, urlparse
+
 from app.config import settings
 from app.db.models import InvoiceLine, QboToken, SyncRun, get_db
-from app.integrations.quickbooks import exchange_code_for_tokens, get_authorization_url
+
+from app.integrations.quickbooks import (
+    disconnect_qbo,
+    exchange_code_for_tokens,
+    fetch_company_name,
+    get_authorization_url,
+    intuit_logout_url,
+)
 from app.services.margins import build_practice_summary
 from app.services.sync import sync_all, sync_qbo, sync_shepherd
 
@@ -54,8 +63,18 @@ async def dashboard(
     end_date = parse_end_date(end) if end else default_end
 
     summary = build_practice_summary(db, start_date, end_date)
-    qbo_connected = db.query(QboToken).count() > 0
+    qbo_token = db.query(QboToken).order_by(QboToken.updated_at.desc()).first()
+    qbo_connected = qbo_token is not None
+    qbo_company_name = ""
+    if qbo_token is not None:
+        try:
+            qbo_company_name = await fetch_company_name(qbo_token, db)
+        except Exception:
+            qbo_company_name = ""
     recent_syncs = db.query(SyncRun).order_by(SyncRun.created_at.desc()).limit(8).all()
+    qbo_is_sandbox = settings.qbo_environment != "production"
+    qbo_status = request.query_params.get("qbo", "")
+    qbo_error_detail = request.query_params.get("detail", "")
 
     return templates.TemplateResponse(
         request,
@@ -68,16 +87,80 @@ async def dashboard(
             "qbo_configured": settings.qbo_configured,
             "qbo_connected": qbo_connected,
             "qbo_environment": settings.qbo_environment,
+            "qbo_is_sandbox": qbo_is_sandbox,
+            "qbo_company_name": qbo_company_name,
+            "qbo_redirect_uri": settings.qbo_redirect_uri,
+            "qbo_status": qbo_status,
+            "qbo_error_detail": qbo_error_detail,
             "recent_syncs": recent_syncs,
         },
     )
 
 
 @router.get("/qbo/connect")
-async def qbo_connect():
+async def qbo_connect(
+    request: Request,
+    db: Session = Depends(get_db),
+    fresh: int = Query(default=1),
+    logout: int = Query(default=0),
+):
     if not settings.qbo_configured:
         return RedirectResponse("/", status_code=303)
-    return RedirectResponse(get_authorization_url())
+
+    # Always clear any prior connection before starting OAuth.
+    disconnect_qbo(db)
+    state = f"vet-margin-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    authorize_url = get_authorization_url(state=state, force_login=True)
+
+    # Optional Intuit logout hop. Default OFF because Intuit often ignores
+    # redirect_uri and drops the user on their account home (breaking OAuth).
+    if logout:
+        host = str(request.base_url).rstrip("/")
+        return_to = f"{host}/qbo/authorize?state={quote(state)}"
+        return RedirectResponse(intuit_logout_url(return_to), status_code=303)
+
+    return RedirectResponse(authorize_url, status_code=303)
+
+
+@router.get("/qbo/authorize")
+async def qbo_authorize(state: str = Query(default="vet-margin-dashboard")):
+    """Second hop after Intuit logout — start OAuth with a fresh login prompt."""
+    if not settings.qbo_configured:
+        return RedirectResponse("/", status_code=303)
+    return RedirectResponse(
+        get_authorization_url(state=state, force_login=True),
+        status_code=303,
+    )
+
+
+@router.get("/qbo/disconnect")
+async def qbo_disconnect(db: Session = Depends(get_db)):
+    disconnect_qbo(db)
+    return RedirectResponse("/?qbo=disconnected", status_code=303)
+
+
+@router.get("/qbo/reset")
+async def qbo_reset(db: Session = Depends(get_db)):
+    """Hard reset connection state, then send the user to a fresh Intuit login."""
+    disconnect_qbo(db)
+    return RedirectResponse("/qbo/connect?fresh=1", status_code=303)
+
+
+def _extract_oauth_callback(raw: str) -> tuple[str, str]:
+    """Parse code + realmId from a pasted Intuit/GitHub Pages callback URL."""
+    text = (raw or "").strip()
+    if not text:
+        raise ValueError("Paste the full callback URL from the OAuth catcher page.")
+    parsed = urlparse(text)
+    query = parse_qs(parsed.query)
+    if not query and "code=" in text:
+        # Allow pasting a raw query string.
+        query = parse_qs(text.lstrip("?"))
+    code = (query.get("code") or [""])[0].strip()
+    realm_id = (query.get("realmId") or query.get("realm_id") or [""])[0].strip()
+    if not code or not realm_id:
+        raise ValueError("Callback URL must include code and realmId query parameters.")
+    return code, realm_id
 
 
 @router.get("/qbo/callback")
@@ -86,7 +169,30 @@ async def qbo_callback(
     realmId: str = Query(...),
     db: Session = Depends(get_db),
 ):
+    # Ensure only the newly authorized company remains.
+    disconnect_qbo(db)
     exchange_code_for_tokens(code, realmId, db)
+    return RedirectResponse("/?qbo=connected", status_code=303)
+
+
+@router.post("/qbo/finish")
+async def qbo_finish(
+    db: Session = Depends(get_db),
+    callback_url: str = Form(...),
+):
+    """Finish OAuth when Intuit redirected to the permanent GitHub Pages catcher."""
+    try:
+        code, realm_id = _extract_oauth_callback(callback_url)
+    except ValueError as exc:
+        return RedirectResponse(f"/?qbo=error&detail={quote(str(exc))}", status_code=303)
+    disconnect_qbo(db)
+    try:
+        exchange_code_for_tokens(code, realm_id, db)
+    except Exception as exc:
+        return RedirectResponse(
+            f"/?qbo=error&detail={quote(f'Token exchange failed: {exc}')}",
+            status_code=303,
+        )
     return RedirectResponse("/?qbo=connected", status_code=303)
 
 

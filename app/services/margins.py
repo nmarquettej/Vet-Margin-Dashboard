@@ -55,27 +55,32 @@ class PracticeSummary:
     using_shepherd_report: bool = False
 
 
-def _qbo_expense_filters(start_date: datetime, end_date: datetime):
-    end_day = parse_end_date(end_date.replace(hour=0, minute=0, second=0, microsecond=0))
-    end_day_start = end_day.replace(hour=0, minute=0, second=0, microsecond=0)
-    return (
-        QboExpense.period_start == parse_start_date(start_date),
-        QboExpense.period_end >= end_day_start,
-        QboExpense.period_end <= end_day,
-    )
+def _qbo_expense_period(start_date: datetime, end_date: datetime) -> tuple[datetime, datetime]:
+    """Normalize to the same start/end datetimes used when storing a QBO sync."""
+    return parse_start_date(start_date), parse_end_date(end_date)
 
 
 def _deduped_qbo_expenses(db: Session, start_date: datetime, end_date: datetime) -> list[QboExpense]:
+    """Load overhead for this exact dashboard period only.
+
+    QBO P&L totals are period-specific. A YTD sync must not be reused for a month view
+    (that either zeros overhead or massively overstates it).
+    """
+    period_start, period_end = _qbo_expense_period(start_date, end_date)
     expenses = (
         db.query(QboExpense)
-        .filter(*_qbo_expense_filters(start_date, end_date))
+        .filter(
+            QboExpense.period_start == period_start,
+            QboExpense.period_end == period_end,
+        )
         .order_by(QboExpense.synced_at.desc(), QboExpense.id.desc())
         .all()
     )
-    by_account: dict[str, QboExpense] = {}
+    by_account: dict[tuple[str, str], QboExpense] = {}
     for expense in expenses:
-        if expense.account_name not in by_account:
-            by_account[expense.account_name] = expense
+        key = (expense.account_group, expense.account_name)
+        if key not in by_account:
+            by_account[key] = expense
     return list(by_account.values())
 
 

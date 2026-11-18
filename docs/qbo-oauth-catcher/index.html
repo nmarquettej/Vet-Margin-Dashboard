@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vet Margin · QuickBooks OAuth catcher</title>
+  <style>
+    :root {
+      --ink: #1c1917;
+      --muted: #57534e;
+      --paper: #fafaf9;
+      --line: #d6d3d1;
+      --accent: #0f766e;
+      --warn-bg: #fff7ed;
+      --warn-ink: #9a3412;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #ccfbf1 0%, transparent 55%),
+        radial-gradient(900px 400px at 100% 0%, #fef3c7 0%, transparent 50%),
+        var(--paper);
+      padding: 2.5rem 1.25rem 3rem;
+    }
+    main {
+      max-width: 40rem;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: clamp(1.6rem, 3vw, 2rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.4rem;
+    }
+    .lede {
+      color: var(--muted);
+      margin: 0 0 1.5rem;
+      line-height: 1.45;
+    }
+    .card {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.72);
+      padding: 1.25rem 1.35rem;
+      margin-bottom: 1rem;
+    }
+    .ok { border-color: #99f6e4; }
+    .err { background: var(--warn-bg); border-color: #fdba74; color: var(--warn-ink); }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    textarea, input[type="url"] {
+      width: 100%;
+      font: 0.9rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 0.7rem 0.75rem;
+      border: 1px solid var(--line);
+      background: #fff;
+      margin-bottom: 0.75rem;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    button, a.button {
+      appearance: none;
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      padding: 0.65rem 1rem;
+      font: 600 0.95rem/1.1 system-ui, sans-serif;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    button.secondary, a.secondary {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+    }
+    .hint {
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.45;
+      margin: 0.75rem 0 0;
+    }
+    code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.86em; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>QuickBooks authorization received</h1>
+    <p class="lede" id="lede">Finishing the handoff to your local Vet Margin Dashboard…</p>
+
+    <div class="card err" id="error-box" hidden>
+      <strong>Intuit returned an error.</strong>
+      <div id="error-text"></div>
+    </div>
+
+    <div class="card ok" id="success-box" hidden>
+      <p class="hint" style="margin-top:0">
+        If your browser did not jump back to the dashboard automatically,
+        paste the callback below into <strong>Finish QuickBooks connection</strong>
+        on the dashboard (works even when you are on a temporary tunnel URL).
+      </p>
+      <label for="callback">Callback URL</label>
+      <textarea id="callback" rows="4" readonly></textarea>
+      <div class="row">
+        <button type="button" id="copy-btn">Copy callback URL</button>
+        <a class="button secondary" id="open-local" href="#">Open on localhost:8000</a>
+      </div>
+      <p class="hint">
+        Permanent Intuit Production redirect URI for this catcher:<br />
+        <code id="this-origin"></code>
+      </p>
+    </div>
+
+    <div class="card" id="waiting-box">
+      <p class="hint" style="margin:0">
+        Waiting for Intuit to return <code>code</code> and <code>realmId</code>.
+        If you opened this page directly, start Connect from the dashboard instead.
+      </p>
+    </div>
+  </main>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var err = params.get("error") || params.get("error_description");
+      var code = params.get("code");
+      var realmId = params.get("realmId") || params.get("realm_id");
+      var state = params.get("state") || "";
+      var localBase = "http://127.0.0.1:8000/qbo/callback";
+      var thisUri = window.location.origin + window.location.pathname.replace(/\/?$/, "/");
+      document.getElementById("this-origin").textContent = thisUri;
+
+      if (err) {
+        document.getElementById("waiting-box").hidden = true;
+        document.getElementById("error-box").hidden = false;
+        document.getElementById("error-text").textContent = err;
+        document.getElementById("lede").textContent = "Authorization did not complete.";
+        return;
+      }
+
+      if (!code || !realmId) {
+        return;
+      }
+
+      var qs = new URLSearchParams({ code: code, realmId: realmId });
+      if (state) qs.set("state", state);
+      var localUrl = localBase + "?" + qs.toString();
+      var fullCatcherUrl = window.location.href;
+
+      document.getElementById("waiting-box").hidden = true;
+      document.getElementById("success-box").hidden = false;
+      document.getElementById("callback").value = fullCatcherUrl;
+      document.getElementById("open-local").href = localUrl;
+      document.getElementById("lede").textContent =
+        "Company authorization looks good. Completing local handoff…";
+
+      document.getElementById("copy-btn").addEventListener("click", function () {
+        navigator.clipboard.writeText(fullCatcherUrl).then(function () {
+          document.getElementById("copy-btn").textContent = "Copied";
+        });
+      });
+
+      // Best-effort bounce for people running the dashboard on this machine.
+      window.setTimeout(function () {
+        window.location.replace(localUrl);
+      }, 400);
+    })();
+  </script>
+</body>
+</html>
